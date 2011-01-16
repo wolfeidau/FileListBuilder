@@ -1,14 +1,18 @@
 package au.id.wolfe.recursivefilelister;
 
+import au.id.wolfe.recursivefilelister.digest.FileChecksumBuilder;
+import au.id.wolfe.recursivefilelister.digest.FileChecksumException;
+import au.id.wolfe.recursivefilelister.digest.MessageDigestFileChecksumBuilder;
 import au.id.wolfe.recursivefilelister.impl.DefaultFileLister;
 import au.id.wolfe.recursivefilelister.util.Assert;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.concurrent.*;
 
@@ -23,29 +27,30 @@ public class FileSearcher {
 
     FileLister fileLister;
 
+    FileChecksumBuilder fileChecksumBuilder;
+
     ExecutorService executor = Executors.newFixedThreadPool(20);
 
     static final int N_CONSUMERS = 10;
 
-    public void startMyApplication(String basePath) {
+    public void startMyApplication(String basePath) throws NoSuchAlgorithmException {
         logger.info("Processing started");
 
         File basePathFile = new File(basePath);
 
         Assert.argumentIsTrue("BasePath exists", basePathFile.exists());
 
-        FileFilter filter = new FileFilter() {
-            public boolean accept(File file) {
-                return true;
-            }
-        };
+        fileLister = new DefaultFileLister();
+        fileChecksumBuilder = new MessageDigestFileChecksumBuilder("MD5");
 
-        Future<String> resultFileCrawler = executor.submit(new FileCrawler(queue, filter, basePathFile));
+        fileLister.configureFileNameExclusions(Sets.<String>newHashSet("~snapshot"));
+
+        Future<String> resultFileCrawler = executor.submit(new FileCrawler(queue, fileLister, basePathFile));
 
         List<Future<String>> resultIndexerList = Lists.newArrayList();
 
-        for (int i = 0; i < N_CONSUMERS; i++){
-           resultIndexerList.add(executor.submit(new Indexer(queue)));
+        for (int i = 0; i < N_CONSUMERS; i++) {
+            resultIndexerList.add(executor.submit(new Indexer(queue, LoggerFactory.getLogger("file.LOG"), fileChecksumBuilder)));
         }
 
         try {
@@ -56,8 +61,21 @@ public class FileSearcher {
             e.printStackTrace();
         }
 
-        //File[] files = fileLister.getFileArrayFromDirectory(new File(basePath));
+        logger.info("Waiting for completion");
 
+        while (!queue.isEmpty()) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        for (Future<String> resultIndexer : resultIndexerList) {
+            resultIndexer.cancel(true);
+        }
+
+        executor.shutdown();
 
         logger.info("Processing finished");
     }
@@ -69,7 +87,11 @@ public class FileSearcher {
         if (args.length == 1) {
             String basePath = args[0];
 
-            new FileSearcher().startMyApplication(basePath);
+            try {
+                new FileSearcher().startMyApplication(basePath);
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            }
 
         } else {
             logger.error("FileSearch directory");
@@ -80,12 +102,12 @@ public class FileSearcher {
     public class FileCrawler implements Callable<String> {
 
         private final BlockingQueue<File> fileQueue;
-        private final FileFilter fileFilter;
+        private final FileLister fileLister;
         private final File root;
 
-        public FileCrawler(BlockingQueue<File> fileQueue, FileFilter fileFilter, File root) {
+        public FileCrawler(BlockingQueue<File> fileQueue, FileLister fileLister, File root) {
             this.fileQueue = fileQueue;
-            this.fileFilter = fileFilter;
+            this.fileLister = fileLister;
             this.root = root;
         }
 
@@ -99,7 +121,7 @@ public class FileSearcher {
         }
 
         private void crawl(File root) throws InterruptedException {
-            File[] entries = root.listFiles(fileFilter);
+            File[] entries = fileLister.getFileArrayFromDirectory(root);
             if (entries != null) {
                 for (File entry : entries)
                     if (entry.isDirectory())
@@ -112,10 +134,16 @@ public class FileSearcher {
     }
 
     public class Indexer implements Callable<String> {
-        private final BlockingQueue<File> queue;
 
-        public Indexer(BlockingQueue<File> queue) {
+        private final BlockingQueue<File> queue;
+        private final Logger fileLogger;
+        private final FileChecksumBuilder fileChecksumBuilder;
+
+
+        public Indexer(BlockingQueue<File> queue, Logger fileLogger, FileChecksumBuilder fileChecksumBuilder) {
             this.queue = queue;
+            this.fileLogger = fileLogger;
+            this.fileChecksumBuilder = fileChecksumBuilder;
         }
 
         public String call() throws Exception {
@@ -130,7 +158,15 @@ public class FileSearcher {
         }
 
         private void indexFile(File file) throws IOException {
-            logger.info(String.format("%s | %s | %s | %s", file.getParentFile().getCanonicalPath(), file.getName(), file.length(), file.isDirectory()));
+            String checksum = "";
+
+            try {
+                checksum = fileChecksumBuilder.calculate(file);
+            } catch (FileChecksumException e) {
+                // do nothing
+            }
+
+            fileLogger.info(String.format("%s | %s | %s | %s | %s | %s", file.getParentFile().getCanonicalPath(), file.getName(), file.length(), file.isDirectory(), file.lastModified(), checksum));
         }
     }
 

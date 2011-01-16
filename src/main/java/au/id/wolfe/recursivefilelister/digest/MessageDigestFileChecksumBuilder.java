@@ -45,7 +45,7 @@ public class MessageDigestFileChecksumBuilder extends AbstractFileChecksumBuilde
             messageDigest.reset();
 
             if (!file.canRead()){
-                return "NO READ";
+                return "CANT READ FILE";
             }
 
             // Obtain a channel

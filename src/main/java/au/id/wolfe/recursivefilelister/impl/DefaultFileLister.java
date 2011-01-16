@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  */
 public class DefaultFileLister implements FileLister {
 
-    Set<String> fileNameExclusions;
+    Set<String> fileNameExclusions = Sets.newHashSet();
 
     public void configureFileNameExclusions(Set<String> fileNameExcludes) {
         fileNameExclusions = Sets.newHashSet(fileNameExcludes);

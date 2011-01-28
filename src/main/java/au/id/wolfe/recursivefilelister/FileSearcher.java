@@ -24,14 +24,13 @@ public class FileSearcher {
 
     BlockingQueue<File> queue = new LinkedBlockingQueue<File>(100);
 
-
     FileLister fileLister;
 
     FileChecksumBuilder fileChecksumBuilder;
 
-    ExecutorService executor = Executors.newFixedThreadPool(20);
+    ExecutorService executor = Executors.newCachedThreadPool();
 
-    static final int N_CONSUMERS = 10;
+    static final int N_CONSUMERS = 5;
 
     public void startMyApplication(String basePath) throws NoSuchAlgorithmException {
         logger.info("Processing started");
@@ -160,11 +159,13 @@ public class FileSearcher {
         private void indexFile(File file) throws IOException {
             String checksum = "";
 
+/*
             try {
                 checksum = fileChecksumBuilder.calculate(file);
             } catch (FileChecksumException e) {
                 // do nothing
             }
+*/
 
             fileLogger.info(String.format("%s | %s | %s | %s | %s | %s", file.getParentFile().getCanonicalPath(), file.getName(), file.length(), file.isDirectory(), file.lastModified(), checksum));
         }
